@@ -131,9 +131,15 @@
           <label>合作形式（投稿類型）</label>
           <div class="plat-row" id="fmtRow">
             <label><input type="checkbox" value="長尺動画">長尺動画</label>
-            <label><input type="checkbox" value="ハイライト短尺動画">ハイライト短尺動画</label>
-            <label><input type="checkbox" value="ショート動画">ショート動画</label>
+            <label><input type="checkbox" value="ハイライト短尺動画">ハイライト短尺動画（45〜90秒程度）</label>
+            <label><input type="checkbox" value="ショート動画">ショート動画（45〜90秒程度）</label>
             <label><input type="checkbox" value="記事投稿">記事投稿</label>
+          </div>
+          <div class="plat-row hidden" id="durRow" style="padding-left:20px;">
+            <span style="font-size:12px;color:var(--sub);">└ 長尺時長：</span>
+            <label><input type="checkbox" value="5分程度">5分程度</label>
+            <label><input type="checkbox" value="5-8分程度">5-8分程度</label>
+            <label><input type="checkbox" value="10分程度以上">10分程度以上</label>
           </div>
           <label>合作平台</label>
           <div class="plat-row" id="platRow">
@@ -149,16 +155,16 @@
           <textarea id="fPrice" rows="3" placeholder="例：基本 $800；80萬播放 +$400（合計$1200）；120萬 +$700（合計$1500）；200萬 +$1200（合計$2000）&#10;或：置換合作（Pro 1個月無償提供）"></textarea>
           <div class="row">
             <div>
-              <label>腳本提交日期</label>
-              <input type="text" id="fD1" placeholder="例：7月13日〜14日">
+              <label>腳本提交日期（填最後一天）</label>
+              <input type="text" id="fD1" placeholder="例：7/14 → 7月13日〜14日">
             </div>
             <div>
-              <label>初稿確認日期</label>
-              <input type="text" id="fD2" placeholder="例：7月19日〜20日">
+              <label>初稿確認日期（填最後一天）</label>
+              <input type="text" id="fD2" placeholder="例：7/20 → 7月19日〜20日">
             </div>
             <div>
-              <label>發布日期</label>
-              <input type="text" id="fD3" placeholder="例：7月22日〜23日">
+              <label>發布日期（填最後一天）</label>
+              <input type="text" id="fD3" placeholder="例：7/23 → 7月22日〜23日">
             </div>
           </div>
           <label>博主來信原文（選填——貼上後 AI 會針對其內容和疑問逐條回應）</label>
@@ -422,6 +428,34 @@ ${letter}`}] })
 $("fLetter").addEventListener("blur", detectName);
 $("fLetter").addEventListener("paste", ()=>setTimeout(detectName, 100));
 
+/* ================= 合作形式：長尺時長子選項 ================= */
+document.querySelectorAll("#fmtRow input").forEach(c=>{
+  c.addEventListener("change", ()=>{
+    if(c.value === "長尺動画"){
+      $("durRow").classList.toggle("hidden", !c.checked);
+      if(!c.checked) document.querySelectorAll("#durRow input").forEach(d=>d.checked=false);
+    }
+  });
+});
+
+/* ================= 日期自動回推（填最後一天 → 前一天〜當天） ================= */
+function expandDate(s){
+  s = (s||"").trim();
+  if(!s) return "";
+  const m = s.match(/^(?:(\d{4})[\/\.年])?(\d{1,2})[\/\.月](\d{1,2})日?$/);
+  if(!m) return s; /* 已是範圍或其他寫法，原樣使用 */
+  const y = m[1] ? +m[1] : new Date().getFullYear();
+  const end = new Date(y, +m[2]-1, +m[3]);
+  if(isNaN(end.getTime())) return s;
+  const start = new Date(y, +m[2]-1, +m[3]-1);
+  if(start.getMonth() === end.getMonth())
+    return (end.getMonth()+1) + "月" + start.getDate() + "日〜" + end.getDate() + "日";
+  return (start.getMonth()+1) + "月" + start.getDate() + "日〜" + (end.getMonth()+1) + "月" + end.getDate() + "日";
+}
+["fD1","fD2","fD3"].forEach(id=>{
+  $(id).addEventListener("blur", ()=>{ $(id).value = expandDate($(id).value); });
+});
+
 /* ================= 生成郵件 ================= */
 function gatherPlatforms(){
   return [...document.querySelectorAll("#platRow input:checked")].map(c=>c.value);
@@ -431,10 +465,17 @@ async function generate(){
   const sign = localStorage.getItem("dsSign") || "あかね / Hi3D AI - APAC Marketing";
   const tplBody = $("tplRaw").value;
   const name = $("fName").value.trim();
-  const fmt = [...document.querySelectorAll("#fmtRow input:checked")].map(c=>c.value).join(" ＋ ");
+  const fmt = [...document.querySelectorAll("#fmtRow input:checked")].map(c=>{
+    if(c.value === "長尺動画"){
+      const durs = [...document.querySelectorAll("#durRow input:checked")].map(d=>d.value);
+      return "長尺動画" + (durs.length ? "（" + durs.join("／") + "）" : "");
+    }
+    if(c.value === "ハイライト短尺動画" || c.value === "ショート動画") return c.value + "（45〜90秒程度）";
+    return c.value;
+  }).join(" ＋ ");
   const plats = gatherPlatforms();
   const price = $("fPrice").value.trim();
-  const d1 = $("fD1").value.trim(), d2 = $("fD2").value.trim(), d3 = $("fD3").value.trim();
+  const d1 = expandDate($("fD1").value), d2 = expandDate($("fD2").value), d3 = expandDate($("fD3").value);
   const letter = $("fLetter").value.trim();
   const extra = $("fExtra").value.trim();
 
@@ -464,7 +505,7 @@ ${tplBody}
 
 ■ 客制化資料：
 - 達人稱呼：${name || "（未提供，用ご担当者様）"}
-- 合作形式：${fmt || "（未提供，維持模版原文）"}
+- 合作形式：${fmt ? fmt + "（※括號內的時長標註只寫在「投稿タイプ」一行，郵件其他位置提及投稿類型時一律不帶時長）" : "（未提供，維持模版原文）"}
 - 合作平台：${plats.length ? plats.join(" / ") : "（未提供，維持模版原文）"}
 - 報價：${price || "（未提供）"}
 - Schedule：腳本 ${d1||"（未提供）"}｜初稿 ${d2||"（未提供）"}｜發布 ${d3||"（未提供）"}`;
