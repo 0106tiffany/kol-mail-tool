@@ -121,8 +121,8 @@
 
         <div class="card" style="margin-top:16px;">
           <h2>2️⃣ 客制化模塊 <span style="font-weight:400;color:var(--sub);font-size:12px;">（留空的模塊將維持模版原文或自動省略）</span></h2>
-          <label>達人稱呼（如：田中、MokoChannel）</label>
-          <input type="text" id="fName" placeholder="留空則用「ご担当者 様」">
+          <label>達人稱呼（如：田中、MokoChannel）<span class="status" id="nameStatus" style="font-weight:400;"></span></label>
+          <input type="text" id="fName" placeholder="留空則用「ご担当者 様」；貼上博主來信可自動識別">
           <label>合作形式（投稿類型）</label>
           <div class="plat-row" id="fmtRow">
             <label><input type="checkbox" value="長尺動画">長尺動画</label>
@@ -1519,6 +1519,46 @@ async function callDeepSeek(messages, outEl, statusEl, btnEl){
   }finally{ btnEl.disabled = false; }
 }
 
+/* ================= 自動識別博主名字 ================= */
+let detectingName = false;
+async function detectName(){
+  const letter = $("fLetter").value.trim();
+  if(!letter || $("fName").value.trim() || detectingName) return;
+  const key = localStorage.getItem("dsKey") || DEFAULT_KEY;
+  if(!key) return;
+  const st = $("nameStatus");
+  detectingName = true; st.textContent = "｜識別名字中…"; st.className = "status";
+  try{
+    const res = await fetch("https://api.deepseek.com/chat/completions",{
+      method:"POST",
+      headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+key },
+      body: JSON.stringify({ model:"deepseek-chat", temperature:0, max_tokens:20, messages:[{role:"user", content:
+`從下面這封寄給 Hi3D（担当者：あかね）的郵件中，識別「寄件人（博主本人）」的名字。
+規則：
+- 郵件開頭的宛名（如「あかね様」「Hi3D御中」）是收件人＝我們自己，必須排除
+- 寄件人名字通常出現在「〇〇です」「〇〇と申します」「管理人の〇〇」或文末署名
+- 個人名與頻道名/部落格名同時出現時，優先個人名
+- 只有頻道名時輸出頻道名
+- 無法識別時只輸出 NONE
+只輸出名字本身（不要加様、引號或任何解釋）。
+
+郵件原文：
+${letter}`}] })
+    });
+    const j = await res.json();
+    let n = (j.choices && j.choices[0] && j.choices[0].message.content || "").trim();
+    if(n && n !== "NONE" && n.length <= 20){
+      if(!$("fName").value.trim()) $("fName").value = n;
+      st.textContent = "｜已自動識別：" + n + "（可修改）"; st.className = "status ok";
+    } else {
+      st.textContent = "｜未能識別名字，可手動填寫"; st.className = "status";
+    }
+  }catch(e){ st.textContent = ""; }
+  finally{ detectingName = false; }
+}
+$("fLetter").addEventListener("blur", detectName);
+$("fLetter").addEventListener("paste", ()=>setTimeout(detectName, 100));
+
 /* ================= 生成郵件 ================= */
 function gatherPlatforms(){
   return [...document.querySelectorAll("#platRow input:checked")].map(c=>c.value);
@@ -1539,7 +1579,7 @@ async function generate(){
 
 嚴格遵守：
 1. 敬語與語氣完全沿用模版風格（丁寧語＋謙譲語，商務 outreach 口吻），不要改寫模版既有的固定句式，只做必要的客制化替換與銜接潤飾。
-2. 模版中的「◯◯様 / ご担当者 様」按提供的達人稱呼替換（外國人名後接「様」）；未提供稱呼則保留「ご担当者 様」。
+2. 模版中的「◯◯様 / ご担当者 様」按提供的達人稱呼替換（外國人名後接「様」）。若未提供稱呼但有博主來信，從來信識別寄件人名字使用（注意：來信開頭的宛名如「あかね様」是收件人＝我方，必須排除；寄件人名字通常在「〇〇です」「〇〇と申します」「管理人の〇〇」或文末署名，個人名優先於頻道名，如「管理人のせなおです」→「せなお様」）；都無法確定則保留「ご担当者 様」。
 3. 模版中的佔位（◯月◯日、$◯、（ここに報酬提案を記載）等）用提供的客制化資料填入；某模塊資料未提供時：若模版原文完整可用則保留原文，若該模塊必須有具體數字才成立（如報價階梯、日期），則整塊省略或插入【待補充：○○】提醒，禁止自行編造金額、日期、連結。
 4. 若提供了博主來信：先理解其內容與問題，在郵件中自然回應（問題逐條回答，格式仿照模版的「■ ご質問①」樣式）。回答只能依據知識庫與客制化資料，超出範圍的問題插入【待補充】。
 5. 「補充要求」為中文指令，優先級最高，按其要求調整內容與語氣。
