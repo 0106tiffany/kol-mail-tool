@@ -151,6 +151,15 @@
             <label><input type="checkbox" value="Note">Note</label>
             <label><input type="checkbox" value="Lemon8">Lemon8</label>
           </div>
+          <label>日圓匯率換算（選填：博主提日圓報酬時，換算近一年美金區間輔助議價）</label>
+          <div class="plat-row" style="align-items:center;">
+            <input type="text" id="fJpyAmt" placeholder="輸入日圓金額，如 150000" style="max-width:180px; flex:none;">
+            <span class="status" id="fxResult">匯率讀取中…</span>
+          </div>
+          <div class="toolbar" id="fxBtnRow" style="margin-top:6px;">
+            <button type="button" class="btn secondary small" id="fxMinBtn" onclick="applyFx('min')" disabled>用最低匯率填入報價</button>
+            <button type="button" class="btn secondary small" id="fxMaxBtn" onclick="applyFx('max')" disabled>用最高匯率填入報價</button>
+          </div>
           <label>報價（基礎報酬＋階梯獎勵，中文或數字皆可）</label>
           <textarea id="fPrice" rows="3" placeholder="例：基本 $800；80萬播放 +$400（合計$1200）；120萬 +$700（合計$1500）；200萬 +$1200（合計$2000）&#10;或：置換合作（Pro 1個月無償提供）"></textarea>
           <div class="row">
@@ -274,6 +283,7 @@ function renderScenarios(){
 }
 function selectTpl(t, btn){
   curTpl = t; curVar = 0;
+  resetCustomFields();
   document.querySelectorAll(".sc-btn").forEach(x=>x.classList.remove("active"));
   btn.classList.add("active");
   const vb = $("variantBox"), vs = $("variantSel");
@@ -320,6 +330,24 @@ function buildTplRaw(){
     body = body.replace(/\n?\{\{OPTIONS\}\}\n?/, parts.length ? "\n\n" + parts.join("\n\n") + "\n\n" : "\n\n").replace(/\n{3,}/g, "\n\n");
   }
   $("tplRaw").value = body;
+}
+
+/* ================= 重新選擇場景時重置客制化欄位 ================= */
+function resetCustomFields(){
+  $("fName").value = "";
+  $("nameStatus").textContent = "";
+  document.querySelectorAll("#fmtRow input").forEach(c=>c.checked=false);
+  document.querySelectorAll("#durRow input").forEach(c=>c.checked=false);
+  $("durRow").classList.add("hidden");
+  document.querySelectorAll("#platRow input").forEach(c=>c.checked=false);
+  $("fJpyAmt").value = "";
+  updateFxCalc();
+  $("fPrice").value = "";
+  $("fD1").value = ""; $("fD2").value = ""; $("fD3").value = "";
+  $("fLetter").value = "";
+  $("fExtra").value = "";
+  $("genOut").textContent = "選擇場景、填寫需求後點「生成」。結果會即時逐字輸出。";
+  $("genStatus").textContent = "";
 }
 
 /* ================= Tabs ================= */
@@ -437,6 +465,56 @@ document.querySelectorAll("#fmtRow input").forEach(c=>{
     }
   });
 });
+
+/* ================= 日圓匯率換算（近一年 USD/JPY 最低〜最高區間） ================= */
+const FX_CACHE_KEY = "dsFxJpyUsdRange";
+const FX_CACHE_TTL = 24*60*60*1000; // 24小時
+let fxRange = null; // {min, max, ts}
+async function loadFxRange(){
+  try{
+    const cached = JSON.parse(localStorage.getItem(FX_CACHE_KEY) || "null");
+    if(cached && (Date.now() - cached.ts) < FX_CACHE_TTL){ fxRange = cached; updateFxCalc(); return; }
+    const end = new Date();
+    const start = new Date(); start.setDate(start.getDate() - 365);
+    const fmt = d => d.toISOString().slice(0,10);
+    const res = await fetch(`https://api.frankfurter.dev/v1/${fmt(start)}..${fmt(end)}?from=JPY&to=USD`);
+    if(!res.ok) throw new Error("匯率 API 錯誤 " + res.status);
+    const j = await res.json();
+    const rates = Object.values(j.rates || {}).map(r=>r.USD).filter(v=>typeof v === "number");
+    if(!rates.length) throw new Error("無匯率資料");
+    fxRange = { min: Math.min(...rates), max: Math.max(...rates), ts: Date.now() };
+    localStorage.setItem(FX_CACHE_KEY, JSON.stringify(fxRange));
+  }catch(e){
+    fxRange = null;
+    $("fxResult").textContent = "匯率讀取失敗，可手動輸入報價";
+  }
+  updateFxCalc();
+}
+function updateFxCalc(){
+  const el = $("fxResult");
+  const amt = parseFloat($("fJpyAmt").value);
+  if(!fxRange){ if(el.textContent!=="匯率讀取失敗，可手動輸入報價") el.textContent = "匯率讀取中…"; $("fxMinBtn").disabled = true; $("fxMaxBtn").disabled = true; return; }
+  if(!amt || amt <= 0){
+    el.textContent = `近一年 USD/JPY 匯率區間：1 JPY ≈ ${fxRange.min.toFixed(5)}〜${fxRange.max.toFixed(5)} USD`;
+    $("fxMinBtn").disabled = true; $("fxMaxBtn").disabled = true;
+    return;
+  }
+  const lo = Math.round(amt * fxRange.min);
+  const hi = Math.round(amt * fxRange.max);
+  el.textContent = `→ 換算：約 $${lo} 〜 $${hi}（近一年匯率區間）`;
+  $("fxMinBtn").disabled = false; $("fxMaxBtn").disabled = false;
+}
+$("fJpyAmt").addEventListener("input", updateFxCalc);
+function applyFx(kind){
+  if(!fxRange) return;
+  const amt = parseFloat($("fJpyAmt").value);
+  if(!amt || amt <= 0) return;
+  const rate = kind === "min" ? fxRange.min : fxRange.max;
+  const usd = Math.round(amt * rate);
+  const line = `基本報酬：$${usd}（換算自 ¥${amt.toLocaleString()}，採近一年${kind==="min"?"最低":"最高"}匯率 1 JPY≈${rate.toFixed(5)} USD）`;
+  const cur = $("fPrice").value.trim();
+  $("fPrice").value = cur ? cur + "\n" + line : line;
+}
 
 /* ================= 日期自動回推（填最後一天 → 前一天〜當天） ================= */
 function expandDate(s){
@@ -579,6 +657,7 @@ function copyTr(){ doCopy($("trOut").textContent, $("trCopyStatus")); }
   }
 })();
 initStages();
+loadFxRange();
 </script>
 </body>
 </html>
